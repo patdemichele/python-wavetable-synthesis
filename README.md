@@ -19,13 +19,15 @@ wavetable_env\Scripts\activate     # On Windows
 # Install dependencies (if needed)
 pip install -r requirements.txt
 
-# Run examples
+# Run examples. See generated/ for the output wav files
 python example.py
 ```
 
 The repository includes a pre-configured virtual environment with all dependencies installed. Simply clone and activate to get started immediately.
 
 ## Quick Start
+
+Here's an extra simple example of the usage. For a more robust series of examples, see `example.py`.
 
 ```python
 from wavetable import *
