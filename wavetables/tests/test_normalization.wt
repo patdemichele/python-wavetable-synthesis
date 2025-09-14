@@ -1,0 +1,6 @@
+# Test normalization function
+# Create a loud wave (max amplitude = 10)
+let loud_wave = 10.0 * f
+
+# Normalize it (should become max amplitude = 1)
+n(loud_wave)

@@ -1,0 +1,6 @@
+# Phase modulation with segments
+let carrier_seg = segment(f, 3f, 10)
+let modulator_seg = segment(2f, f, 10)
+
+# PM the carrier with the modulator
+pm(carrier_seg, modulator_seg, 1.0)

@@ -1,0 +1,3 @@
+let carrier = f # fundamental frequency
+let modulator = 2f # second harmonic
+pm(carrier, modulator, 0.8) # 80% phase modulation

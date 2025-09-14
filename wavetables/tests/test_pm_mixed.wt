@@ -1,0 +1,6 @@
+# Mixed PM: wave modulating segment
+let carrier_seg = segment(f, 5f, 8)
+let modulator_wave = 3f
+
+# Static wave modulating a changing carrier
+pm(carrier_seg, modulator_wave, 0.8)

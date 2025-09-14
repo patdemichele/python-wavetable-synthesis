@@ -1,0 +1,2 @@
+# PM with zero modulation - should be same as carrier
+pm(f, 2f, 0.0)

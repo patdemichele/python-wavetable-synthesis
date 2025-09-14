@@ -23,7 +23,7 @@ enum class TokenType {
     CAT,
     NORMALIZE,  // 'n'
     SETLEN,
-    FM,
+    PM,
     NEWLINE,
     EOF_TOKEN,
     COMMENT
@@ -134,11 +134,30 @@ public:
         harmonics.push_back(Harmonic(harmonic_num, amplitude));
     }
 
-    std::shared_ptr<Wave> multiply(double scalar) const;
+    virtual ~Wave() = default;
+
+    virtual std::shared_ptr<Wave> multiply(double scalar) const;
     std::shared_ptr<Wave> add(const Wave& other) const;
     std::shared_ptr<Wave> normalize() const;
-    std::vector<float> generateSamples(int sample_count = 2048) const;
+    std::shared_ptr<Wave> phaseModulate(const Wave& modulator, double amount) const;
+    virtual std::vector<float> generateSamples(int sample_count = 2048) const;
     double getMaxAmplitude() const { return max_amplitude; }
+};
+
+class PMWave : public Wave {
+public:
+    Wave carrier;
+    Wave modulator;
+    double pm_amount;
+
+    PMWave(const Wave& carr, const Wave& mod, double amount)
+        : Wave(), carrier(carr), modulator(mod), pm_amount(amount) {
+        // Max amplitude is carrier's max amplitude (PM doesn't change overall amplitude much)
+        max_amplitude = carrier.getMaxAmplitude();
+    }
+
+    std::vector<float> generateSamples(int sample_count = 2048) const override;
+    std::shared_ptr<Wave> multiply(double scalar) const override;
 };
 
 class ConcatenatedSegment;
@@ -161,6 +180,7 @@ public:
     std::shared_ptr<Segment> concatenate(const Segment& other) const;
     virtual std::shared_ptr<Segment> normalize() const;
     std::shared_ptr<Segment> setLength(double new_length) const;
+    virtual std::shared_ptr<Segment> phaseModulate(const Segment& modulator, double amount) const;
     virtual std::vector<std::vector<float>> generateFrames(int frame_count = 256) const;
     double getMaxAmplitude() const { return max_amplitude; }
 };
@@ -241,7 +261,12 @@ private:
 class WTCompiler {
 public:
     static bool compileToWAV(const std::string& wt_file, const std::string& output_wav);
+    static bool compileToPlayableWAV(const std::string& wt_file, const std::string& output_wav,
+                                     double frequency, double duration_seconds);
 
 private:
     static std::string readFile(const std::string& filename);
+    static bool exportAudioWAV(const std::vector<float>& audio_data,
+                               const std::string& filename,
+                               int sample_rate);
 };

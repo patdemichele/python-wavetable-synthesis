@@ -7,6 +7,10 @@
 #include <cctype>
 #include <cmath>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // Lexer Implementation
 Lexer::Lexer(const std::string& source) : source(source), position(0), line(1), column(1) {}
 
@@ -59,7 +63,7 @@ Token Lexer::readIdentifier() {
     else if (identifier == "cat") type = TokenType::CAT;
     else if (identifier == "n") type = TokenType::NORMALIZE;
     else if (identifier == "setlen") type = TokenType::SETLEN;
-    else if (identifier == "fm") type = TokenType::FM;
+    else if (identifier == "pm") type = TokenType::PM;
 
     return {type, identifier, line, start_col};
 }
@@ -185,12 +189,16 @@ std::shared_ptr<Program> Parser::program() {
     // Parse assignments
     while (check(TokenType::LET)) {
         prog->assignments.push_back(assignment());
+        // Allow inline comments after assignments
+        if (match(TokenType::COMMENT)) {}
         while (match(TokenType::NEWLINE) || match(TokenType::COMMENT)) {}
     }
 
     // Parse final expression
     if (!check(TokenType::EOF_TOKEN)) {
         prog->final_expression = expression();
+        // Allow inline comment after final expression
+        if (match(TokenType::COMMENT)) {}
     }
 
     return prog;
@@ -201,11 +209,19 @@ std::shared_ptr<Assignment> Parser::assignment() {
         throw std::runtime_error("Expected 'let' keyword");
     }
 
-    if (!check(TokenType::IDENTIFIER)) {
+    if (!check(TokenType::IDENTIFIER) && !check(TokenType::FUNDAMENTAL) &&
+        !check(TokenType::SEGMENT) && !check(TokenType::CAT) &&
+        !check(TokenType::NORMALIZE) && !check(TokenType::SETLEN) && !check(TokenType::PM)) {
         throw std::runtime_error("Expected identifier after 'let'");
     }
 
     std::string var_name = advance().value;
+
+    // Check if variable name is a reserved keyword
+    if (var_name == "f" || var_name == "pm" || var_name == "segment" ||
+        var_name == "cat" || var_name == "n" || var_name == "setlen") {
+        throw std::runtime_error("Variable name '" + var_name + "' is a reserved keyword");
+    }
 
     if (!match(TokenType::EQUALS)) {
         throw std::runtime_error("Expected '=' after variable name");
@@ -274,7 +290,7 @@ std::shared_ptr<Expression> Parser::primary() {
     }
 
     if (check(TokenType::IDENTIFIER) || check(TokenType::SEGMENT) || check(TokenType::CAT) ||
-        check(TokenType::NORMALIZE) || check(TokenType::SETLEN) || check(TokenType::FM)) {
+        check(TokenType::NORMALIZE) || check(TokenType::SETLEN) || check(TokenType::PM)) {
         std::string name = advance().value;
 
         if (check(TokenType::LPAREN)) {
@@ -379,6 +395,58 @@ std::shared_ptr<Wave> Wave::normalize() const {
     return multiply(1.0 / max_amplitude);
 }
 
+std::shared_ptr<Wave> Wave::phaseModulate(const Wave& modulator, double amount) const {
+    // Create a new wave that stores PM parameters
+    auto result = std::make_shared<PMWave>(*this, modulator, amount);
+    return result;
+}
+
+// PMWave Implementation
+std::vector<float> PMWave::generateSamples(int sample_count) const {
+    // For zero modulation amount, just return the carrier
+    if (std::abs(pm_amount) < 1e-10) {
+        return carrier.generateSamples(sample_count);
+    }
+
+    // Generate modulator samples
+    auto modulator_samples = modulator.generateSamples(sample_count);
+
+    // Generate phase-modulated samples
+    std::vector<float> result(sample_count);
+
+    for (int i = 0; i < sample_count; ++i) {
+        float t = static_cast<float>(i) / sample_count; // time from 0 to 1 over one cycle
+        float pm_sample = 0.0f;
+
+        // Sum all carrier harmonics with phase modulation applied
+        for (const auto& harmonic : carrier.harmonics) {
+            float base_phase = 2.0f * M_PI * harmonic.frequency_multiple * t;
+            float modulated_phase = base_phase + pm_amount * modulator_samples[i];
+            pm_sample += static_cast<float>(harmonic.amplitude) * std::sin(modulated_phase);
+        }
+
+        result[i] = pm_sample;
+    }
+
+    return result;
+}
+
+std::shared_ptr<Wave> PMWave::multiply(double scalar) const {
+    // Multiply both carrier and modulator to preserve PM structure
+    Wave scaled_carrier = carrier;
+    Wave scaled_modulator = modulator;
+
+    // Scale the carrier harmonics
+    for (auto& harmonic : scaled_carrier.harmonics) {
+        harmonic.amplitude *= scalar;
+    }
+    scaled_carrier.max_amplitude = carrier.max_amplitude * std::abs(scalar);
+
+    // Create new PMWave with scaled carrier
+    auto result = std::make_shared<PMWave>(scaled_carrier, scaled_modulator, pm_amount);
+    return result;
+}
+
 // Segment Implementation
 std::shared_ptr<Segment> Segment::concatenate(const Segment& other) const {
     return std::make_shared<ConcatenatedSegment>(
@@ -402,9 +470,43 @@ std::shared_ptr<Segment> Segment::setLength(double new_length) const {
     return std::make_shared<Segment>(start_wave, end_wave, new_length);
 }
 
+std::shared_ptr<Segment> Segment::phaseModulate(const Segment& modulator, double amount) const {
+    if (std::abs(length - modulator.length) > 1e-6) {
+        throw std::runtime_error("pm() requires segments of equal length");
+    }
+
+    // Create PM versions of start and end waves using corresponding modulator waves
+    auto pm_start = start_wave->phaseModulate(*modulator.start_wave, amount);
+    auto pm_end = end_wave->phaseModulate(*modulator.end_wave, amount);
+
+    return std::make_shared<Segment>(pm_start, pm_end, length);
+}
+
 std::vector<std::vector<float>> Segment::generateFrames(int frame_count) const {
     std::vector<std::vector<float>> frames;
     frames.reserve(frame_count);
+
+    // Special case: if start and end waves are the same object, no interpolation needed
+    // Also handle case where both waves are equivalent PMWaves (same carrier, modulator, amount)
+    bool use_fast_path = (start_wave.get() == end_wave.get());
+
+    if (!use_fast_path) {
+        // Check if both are PMWaves with same parameters
+        auto start_pm = std::dynamic_pointer_cast<PMWave>(start_wave);
+        auto end_pm = std::dynamic_pointer_cast<PMWave>(end_wave);
+        if (start_pm && end_pm) {
+            // For now, assume PMWaves from normalization are equivalent
+            // (More sophisticated comparison could be added later)
+            use_fast_path = true;
+        }
+    }
+
+    if (use_fast_path) {
+        for (int i = 0; i < frame_count; ++i) {
+            frames.push_back(start_wave->generateSamples());
+        }
+        return frames;
+    }
 
     for (int i = 0; i < frame_count; ++i) {
         float t = (frame_count <= 1) ? 0.0f : static_cast<float>(i) / (frame_count - 1);
@@ -549,6 +651,95 @@ Value Evaluator::evaluate(std::shared_ptr<Expression> expr) {
 
             return seg1->concatenate(*seg2);
         }
+
+        if (func_call->name == "n") {
+            if (func_call->args.size() != 1) {
+                throw std::runtime_error("n() requires exactly 1 argument");
+            }
+
+            auto arg_val = evaluate(func_call->args[0]);
+
+            if (std::holds_alternative<std::shared_ptr<Segment>>(arg_val)) {
+                auto segment = std::get<std::shared_ptr<Segment>>(arg_val);
+                return segment->normalize();
+            } else if (std::holds_alternative<std::shared_ptr<Wave>>(arg_val)) {
+                auto wave = std::get<std::shared_ptr<Wave>>(arg_val);
+                return wave->normalize();
+            } else {
+                throw std::runtime_error("n() argument must be a wave or segment");
+            }
+        }
+
+        if (func_call->name == "setlen") {
+            if (func_call->args.size() != 2) {
+                throw std::runtime_error("setlen() requires exactly 2 arguments");
+            }
+
+            auto seg_val = evaluate(func_call->args[0]);
+            auto length_val = evaluate(func_call->args[1]);
+
+            if (!std::holds_alternative<std::shared_ptr<Segment>>(seg_val) ||
+                !std::holds_alternative<double>(length_val)) {
+                throw std::runtime_error("setlen() requires (segment, number) arguments");
+            }
+
+            auto segment = std::get<std::shared_ptr<Segment>>(seg_val);
+            auto length = std::get<double>(length_val);
+
+            return segment->setLength(length);
+        }
+
+        if (func_call->name == "pm") {
+            if (func_call->args.size() != 3) {
+                throw std::runtime_error("pm() requires exactly 3 arguments");
+            }
+
+            auto carrier_val = evaluate(func_call->args[0]);
+            auto modulator_val = evaluate(func_call->args[1]);
+            auto amount_val = evaluate(func_call->args[2]);
+
+            if (!std::holds_alternative<double>(amount_val)) {
+                throw std::runtime_error("pm() third argument (amount) must be a number");
+            }
+
+            auto amount = std::get<double>(amount_val);
+
+            // Handle Wave PM Wave -> Wave
+            if (std::holds_alternative<std::shared_ptr<Wave>>(carrier_val) &&
+                std::holds_alternative<std::shared_ptr<Wave>>(modulator_val)) {
+                auto carrier = std::get<std::shared_ptr<Wave>>(carrier_val);
+                auto modulator = std::get<std::shared_ptr<Wave>>(modulator_val);
+                return carrier->phaseModulate(*modulator, amount);
+            }
+
+            // Handle Segment PM Segment -> Segment
+            if (std::holds_alternative<std::shared_ptr<Segment>>(carrier_val) &&
+                std::holds_alternative<std::shared_ptr<Segment>>(modulator_val)) {
+                auto carrier = std::get<std::shared_ptr<Segment>>(carrier_val);
+                auto modulator = std::get<std::shared_ptr<Segment>>(modulator_val);
+                return carrier->phaseModulate(*modulator, amount);
+            }
+
+            // Handle Wave PM Segment -> Segment (carrier becomes static segment)
+            if (std::holds_alternative<std::shared_ptr<Wave>>(carrier_val) &&
+                std::holds_alternative<std::shared_ptr<Segment>>(modulator_val)) {
+                auto carrier_wave = std::get<std::shared_ptr<Wave>>(carrier_val);
+                auto modulator_seg = std::get<std::shared_ptr<Segment>>(modulator_val);
+                auto carrier_seg = std::make_shared<Segment>(carrier_wave, carrier_wave, modulator_seg->length);
+                return carrier_seg->phaseModulate(*modulator_seg, amount);
+            }
+
+            // Handle Segment PM Wave -> Segment (modulator becomes static segment)
+            if (std::holds_alternative<std::shared_ptr<Segment>>(carrier_val) &&
+                std::holds_alternative<std::shared_ptr<Wave>>(modulator_val)) {
+                auto carrier_seg = std::get<std::shared_ptr<Segment>>(carrier_val);
+                auto modulator_wave = std::get<std::shared_ptr<Wave>>(modulator_val);
+                auto modulator_seg = std::make_shared<Segment>(modulator_wave, modulator_wave, carrier_seg->length);
+                return carrier_seg->phaseModulate(*modulator_seg, amount);
+            }
+
+            throw std::runtime_error("pm() arguments must be waves or segments");
+        }
     }
 
     throw std::runtime_error("Cannot evaluate expression");
@@ -594,6 +785,84 @@ std::string WTCompiler::readFile(const std::string& filename) {
     return buffer.str();
 }
 
+bool WTCompiler::exportAudioWAV(const std::vector<float>& audio_data,
+                                const std::string& filename,
+                                int sample_rate) {
+    // Write WAV header manually for audio (not wavetable format)
+    std::vector<uint8_t> buffer;
+
+    // WAV header
+    // "RIFF" chunk
+    buffer.insert(buffer.end(), {'R', 'I', 'F', 'F'});
+
+    // File size (will be updated at the end)
+    uint32_t file_size = 36 + audio_data.size() * 2; // 36 bytes header + data
+    buffer.push_back(file_size & 0xFF);
+    buffer.push_back((file_size >> 8) & 0xFF);
+    buffer.push_back((file_size >> 16) & 0xFF);
+    buffer.push_back((file_size >> 24) & 0xFF);
+
+    // "WAVE" format
+    buffer.insert(buffer.end(), {'W', 'A', 'V', 'E'});
+
+    // "fmt " subchunk
+    buffer.insert(buffer.end(), {'f', 'm', 't', ' '});
+
+    // Subchunk1Size (16 for PCM)
+    buffer.insert(buffer.end(), {16, 0, 0, 0});
+
+    // AudioFormat (1 for PCM)
+    buffer.insert(buffer.end(), {1, 0});
+
+    // NumChannels (1 for mono)
+    buffer.insert(buffer.end(), {1, 0});
+
+    // SampleRate
+    buffer.push_back(sample_rate & 0xFF);
+    buffer.push_back((sample_rate >> 8) & 0xFF);
+    buffer.push_back((sample_rate >> 16) & 0xFF);
+    buffer.push_back((sample_rate >> 24) & 0xFF);
+
+    // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+    uint32_t byte_rate = sample_rate * 1 * 2; // 16-bit mono
+    buffer.push_back(byte_rate & 0xFF);
+    buffer.push_back((byte_rate >> 8) & 0xFF);
+    buffer.push_back((byte_rate >> 16) & 0xFF);
+    buffer.push_back((byte_rate >> 24) & 0xFF);
+
+    // BlockAlign (NumChannels * BitsPerSample/8)
+    buffer.insert(buffer.end(), {2, 0}); // 16-bit mono = 2 bytes
+
+    // BitsPerSample
+    buffer.insert(buffer.end(), {16, 0});
+
+    // "data" subchunk
+    buffer.insert(buffer.end(), {'d', 'a', 't', 'a'});
+
+    // Subchunk2Size (NumSamples * NumChannels * BitsPerSample/8)
+    uint32_t data_size = audio_data.size() * 2;
+    buffer.push_back(data_size & 0xFF);
+    buffer.push_back((data_size >> 8) & 0xFF);
+    buffer.push_back((data_size >> 16) & 0xFF);
+    buffer.push_back((data_size >> 24) & 0xFF);
+
+    // Audio data
+    for (float sample : audio_data) {
+        int16_t pcm_sample = static_cast<int16_t>(std::clamp(sample, -1.0f, 1.0f) * 32767.0f);
+        buffer.push_back(pcm_sample & 0xFF);
+        buffer.push_back((pcm_sample >> 8) & 0xFF);
+    }
+
+    // Write to file
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) {
+        return false;
+    }
+
+    file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+    return file.good();
+}
+
 bool WTCompiler::compileToWAV(const std::string& wt_file, const std::string& output_wav) {
     try {
         // Read source file
@@ -612,6 +881,12 @@ bool WTCompiler::compileToWAV(const std::string& wt_file, const std::string& out
         auto result = evaluator.evaluate(program);
 
         // Convert to wavetable
+        if (std::holds_alternative<std::shared_ptr<Wave>>(result)) {
+            auto wave = std::get<std::shared_ptr<Wave>>(result);
+            auto segment = std::make_shared<Segment>(wave, wave, 1);
+            result = segment;
+        }
+
         if (!std::holds_alternative<std::shared_ptr<Segment>>(result)) {
             throw std::runtime_error("Final expression must be a segment");
         }
@@ -635,6 +910,75 @@ bool WTCompiler::compileToWAV(const std::string& wt_file, const std::string& out
 
     } catch (const std::exception& e) {
         std::cerr << "Compilation error: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool WTCompiler::compileToPlayableWAV(const std::string& wt_file, const std::string& output_wav,
+                                      double frequency, double duration_seconds) {
+    try {
+        // Read and compile the wavetable source file
+        std::string source = readFile(wt_file);
+
+        // Tokenize
+        Lexer lexer(source);
+        auto tokens = lexer.tokenize();
+
+        // Parse
+        Parser parser(tokens);
+        auto program = parser.parse();
+
+        // Evaluate
+        Evaluator evaluator;
+        auto result = evaluator.evaluate(program);
+
+        // Convert to wavetable
+        if (std::holds_alternative<std::shared_ptr<Wave>>(result)) {
+            auto wave = std::get<std::shared_ptr<Wave>>(result);
+            auto segment = std::make_shared<Segment>(wave, wave, 1);
+            result = segment;
+        }
+
+        if (!std::holds_alternative<std::shared_ptr<Segment>>(result)) {
+            throw std::runtime_error("Final expression must be a segment");
+        }
+
+        auto segment = std::get<std::shared_ptr<Segment>>(result);
+
+        // Always normalize the final segment to prevent clipping
+        auto normalized_segment = segment->normalize();
+        auto frames = normalized_segment->generateFrames(256);
+
+        // Generate playable audio at the specified frequency and duration
+        const int sample_rate = 44100;
+        const int total_samples = static_cast<int>(duration_seconds * sample_rate);
+        const int samples_per_cycle = static_cast<int>(sample_rate / frequency);
+
+        std::vector<float> audio_data;
+        audio_data.reserve(total_samples);
+
+        for (int sample_idx = 0; sample_idx < total_samples; ++sample_idx) {
+            // Calculate which frame to use based on time progression
+            double time_progress = static_cast<double>(sample_idx) / total_samples;
+            int frame_index = static_cast<int>(time_progress * (frames.size() - 1));
+            frame_index = std::min(frame_index, static_cast<int>(frames.size()) - 1);
+
+            // Calculate position within the current cycle
+            int cycle_position = sample_idx % samples_per_cycle;
+            double wave_position = static_cast<double>(cycle_position) / samples_per_cycle;
+
+            // Interpolate within the wavetable frame
+            int wave_sample_index = static_cast<int>(wave_position * 2048);
+            wave_sample_index = std::min(wave_sample_index, 2047);
+
+            audio_data.push_back(frames[frame_index][wave_sample_index]);
+        }
+
+        // Export as standard audio WAV (not wavetable format)
+        return exportAudioWAV(audio_data, output_wav, sample_rate);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Audio generation error: " << e.what() << std::endl;
         return false;
     }
 }

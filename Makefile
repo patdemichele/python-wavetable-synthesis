@@ -3,11 +3,11 @@ CXXFLAGS = -std=c++17 -Wall -Wextra -O2
 
 # Targets
 WAVETABLE_TARGET = wavetable_example
-COMPILER_TARGET = compile
+COMPILER_TARGET = render
 
 # Sources
 WAVETABLE_SOURCES = wavetable_generator.cpp example.cpp
-COMPILER_SOURCES = wavetable_generator.cpp wt_compiler.cpp compile.cpp
+COMPILER_SOURCES = wavetable_generator.cpp wt_compiler.cpp render.cpp
 
 # Objects
 WAVETABLE_OBJECTS = $(WAVETABLE_SOURCES:.cpp=.o)
@@ -25,6 +25,6 @@ $(COMPILER_TARGET): $(COMPILER_OBJECTS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o $(WAVETABLE_TARGET) $(COMPILER_TARGET) wavetables/*.wav
+	rm -f *.o $(WAVETABLE_TARGET) $(COMPILER_TARGET) wavetables/*.wav wavetables/*.asd wavetables/tests/*.wav wavetables/tests/*.asd
 
 .PHONY: clean all

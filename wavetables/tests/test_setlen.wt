@@ -1,0 +1,9 @@
+# Test length control function
+let seg1 = segment(f, 3f, 5)
+let seg2 = segment(3f, f, 8)
+
+# Original concatenation: 5 + 8 = 13 total length
+let original = cat(seg1, seg2)
+
+# Scale to length 20: should be 5/13 * 20 ≈ 7.7 frames for first, 12.3 for second
+setlen(original, 20)
