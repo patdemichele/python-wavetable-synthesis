@@ -13,4 +13,7 @@ __pycache__/
 generated/
 
 # Ableton Live analysis files
-*.asd
+*.asdi
+
+# Mac file
+.DS_Store
