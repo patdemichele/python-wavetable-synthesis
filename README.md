@@ -1,6 +1,6 @@
 # Python Wavetable Synthesis Library
 
-A simple but powerful Python library for additive synthesis and phase modulation (which is common called frequency modulation or FM), with support for exporting both audio and wavetables. Compatible with Xfer Serum and other wavetable synthesizers.
+A simple but powerful Python library for additive synthesis and phase modulation (which is common called frequency modulation or FM), with support for exporting both audio and wavetables. Compatible with Xfer Serum, Ableton Wavetable and other wavetable synthesizers.
 
 ## Installation
 
