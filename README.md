@@ -1,6 +1,6 @@
 # Python Wavetable Synthesis Library
 
-A simple but powerful Python library for additive synthesis and phase modulation (which is common called frequency modulation or FM), with support for exporting both audio and wavetables. Compatible with Xfer Serum, Ableton Wavetable and other wavetable synthesizers.
+A simple but powerful Python library for additive synthesis and phase modulation (which is commonly called frequency modulation or FM), with support for exporting both audio and wavetables. Compatible with Xfer Serum, Ableton Wavetable and other wavetable synthesizers.
 
 ## Installation
 
@@ -57,13 +57,14 @@ A static wave is constructed as the sum of frequencies, and the morphing segment
 
 ### Functions
 
-- `H(n, amplitude=1.0)` - Create nth harmonic
-- `PM(carrier, modulator, amount)` - Phase modulation
-- `Segment(start, end, length)` - Create morphing segment
-- `Cat(*segments)` - Concatenate segments
-- `N(wave)` - Normalize to prevent clipping (automatic in Wavetable/Play)
-- `Wavetable(wave, filename)` - Export wavetable (auto-normalizes)
-- `Play(wave, filename, note/frequency, duration)` - Export audio (auto-normalizes)
+- `H(n: int, amplitude: float = 1.0) -> WaveSegment` - Create nth harmonic
+- `PM(carrier: WaveSegment, modulator: WaveSegment, amount: float) -> WaveSegment` - Phase modulation
+- `Segment(start: WaveSegment, end: WaveSegment, length: float) -> WaveSegment` - Create morphing segment
+- `Cat(*segments: WaveSegment) -> WaveSegment` - Concatenate segments
+- `SetLength(wave: WaveSegment, length: float) -> WaveSegment` - Set segment length
+- `N(wave: WaveSegment) -> WaveSegment` - Normalize to prevent clipping (automatic in Wavetable/Play)
+- `Wavetable(wave: WaveSegment, filename: str, frames: int = 256, samples_per_frame: int = 2048) -> None` - Export wavetable (auto-normalizes)
+- `Play(wave: WaveSegment, filename: str, note: str = None, frequency: float = None, duration: float = 1.0) -> None` - Export audio (auto-normalizes)
 
 **Important**: Length parameters are abstract units until rendered. A `Segment(start, end, 8.0)` with length 8.0 represents relative timing - the actual duration depends on the total wavetable frames or audio duration when exported.
 
