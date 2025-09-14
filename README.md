@@ -25,43 +25,47 @@ python example.py
 
 The repository includes a pre-configured virtual environment with all dependencies installed. Simply clone and activate to get started immediately.
 
-## Quick Start
+## Quick Start -- Static Wavetable
 
-Here's an extra simple example of the usage. For a more robust series of examples, see `example.py`.
+The library is based on additive synthesis -- creating waves by adding harmonics. Here's an example of a static wavetable with 3 distinct harmonics.
 
 ```python
 from wavetable import *
 
-# Create basic waves
+# Create basic wave
 fundamental = H(1)                    # 1st harmonic (fundamental)
 second_harmonic = H(2, 0.5)          # 2nd harmonic at half amplitude
-complex_wave = H(1) + 0.3*H(3) + 0.1*H(5)  # Additive synthesis
+# 5th harmonic at 1/10 amplitude (Note the * operator scales amplitude)
+fifth_harmonic = 0.1 * H(5)
+my_wave = fundamental + second_harmonic + fifth_harmonic  # Additive synthesis
 
 # Export as wavetable for Serum (automatically normalized)
-Wavetable(complex_wave, "my_wavetable.wav")
+Wavetable(my_wave, "my_wavetable.wav")
 
 # Generate playable audio (automatically normalized)
-Play(complex_wave, "audio.wav", note="A4", duration=2.0)
+Play(my_wave, "audio.wav", note="A4", duration=2.0)
 ```
 
-## Core Concepts
+## Core Features
 
 ### WaveSegment
-The fundamental building block representing either:
+The core data structure is the `WaveSegment`, which represents either a
 - **Static Wave** (length=0): Single waveform with harmonics
-- **Morphing Segment**: Transition between two waves over time
+- **Morphing Segment** (length>0): An evolving waveform over time
 
-**Important**: Length parameters are abstract units until rendered. A `Segment(start, end, 8.0)` with length 8.0 represents relative timing - the actual duration depends on the total wavetable frames or audio duration when exported.
+A static wave is constructed as the sum of frequencies, and the morphing segments are built up from static waves. Segments can be scaled by amplitude or length. A set of segments can be concatenated (over time). We can perform addition and phase modulation between segments of the same length. `Wavetable` and `Play` functions exist to export segments to audio files. The detailed spec is as follows:
 
-### Key Functions
+### Functions
 
 - `H(n, amplitude=1.0)` - Create nth harmonic
 - `PM(carrier, modulator, amount)` - Phase modulation
-- `Segment(start, end, length)` - Create morphing segment (length is abstract)
+- `Segment(start, end, length)` - Create morphing segment
 - `Cat(*segments)` - Concatenate segments
 - `N(wave)` - Normalize to prevent clipping (automatic in Wavetable/Play)
 - `Wavetable(wave, filename)` - Export wavetable (auto-normalizes)
 - `Play(wave, filename, note/frequency, duration)` - Export audio (auto-normalizes)
+
+**Important**: Length parameters are abstract units until rendered. A `Segment(start, end, 8.0)` with length 8.0 represents relative timing - the actual duration depends on the total wavetable frames or audio duration when exported.
 
 ## Examples
 
