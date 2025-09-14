@@ -1,6 +1,6 @@
 # Python Wavetable Synthesis Library
 
-A powerful Python library for generating wavetables and audio using additive synthesis, phase modulation, morphing, and other advanced synthesis techniques. Compatible with Xfer Serum and other wavetable synthesizers.
+A simple but powerful Python library for additive synthesis and phase modulation (which is common called frequency modulation or FM), with support for exporting both audio and wavetables. Compatible with Xfer Serum and other wavetable synthesizers.
 
 ## Installation
 
@@ -304,13 +304,11 @@ The library supports different wavetable formats for maximum compatibility:
 
 ### Supported Synthesizers
 
-| Synthesizer | Samples per Frame | Constant | File Size* |
-|-------------|-------------------|----------|------------|
-| **Xfer Serum** | 2048 | `SERUM_SAMPLES_PER_FRAME` | ~1.0 MB |
-| **Ableton Live Wavetable** | 1024 | `ABLETON_SAMPLES_PER_FRAME` | ~0.5 MB |
-| **Other WAV-compatible** | Either | Custom | Varies |
-
-*For 256 frames
+| Synthesizer | Samples per Frame | Constant | Notes |
+|-------------|-------------------|----------|-------|
+| **Xfer Serum** | 2048 | `SERUM_SAMPLES_PER_FRAME` | 256 frames standard |
+| **Ableton Live Wavetable** | 1024 | `ABLETON_SAMPLES_PER_FRAME` | Frame count flexible |
+| **Custom/Other** | Any | Custom value | User-defined |
 
 ### Format Examples
 
@@ -323,11 +321,25 @@ wave = H(1) + 0.3*H(2) + 0.1*H(5)
 # Export for Serum (default format)
 Wavetable(wave, "serum_wavetable.wav")
 
-# Export for Ableton Live (smaller file size)
+# Export for Ableton Live (1024 samples per frame)
 Wavetable(wave, "ableton_wavetable.wav", samples_per_frame=ABLETON_SAMPLES_PER_FRAME)
 
-# Export with custom settings
-Wavetable(wave, "custom_wavetable.wav", frames=128, samples_per_frame=1024)
+# Export for some other synthesizer (64 frames, 512 samples each)
+Wavetable(wave, "other_synth.wav", frames=64, samples_per_frame=512)
 ```
 
 **File Size Comparison**: Serum format files are exactly 2x larger than Ableton format due to the sample count difference (2048 vs 1024 samples per frame).
+
+### Using Wavetables in Xfer Serum and Serum 2
+
+To properly use generated wavetables in Serum:
+
+1. **Drag and drop** the `.wav` file into an oscillator (for Serum 2, ensure it's in Wavetable mode). 
+2. When several options appear, make sure to drag the file into the **"Constant Framesize [Pitch Average]"** box. This ensures Serum treats each frame as a separate wavetable position
+3. The wavetable position can then be modulated or automated
+
+**⚠️ Warning**: Because Serum auto-detects the pitch, this may cause the framesize to be interpreted as something other than 2048, leading to misaligned wavetables. If this happens, you may need to experiment with the other wavetable import mechanisms or modify your wavetable to have a more prominent first harmonic (`H(1)`).
+
+### Using Wavetables in Ableton
+
+Ableton's Wavetable synth uses a constant framesize of 1024, which makes this utility perfect, as long as you remember to export with the correct framesize.

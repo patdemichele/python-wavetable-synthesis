@@ -2,8 +2,8 @@
 """
 Comprehensive examples for the wavetable synthesis library.
 
-This demonstrates all key features of the Python wavetable library including
-harmonic generation, phase modulation, morphing, concatenation, and export.
+This demonstrates the key features of the Python wavetable library including
+additive synthesis, phase modulation, morphing, and export functionality.
 Combines functionality from previous demo.py and test_simple.py files.
 """
 
@@ -296,13 +296,19 @@ def synthesizer_compatibility_examples():
     print(f"   - Ableton format: {ableton_size:,} bytes")
     print(f"   - Ratio: {serum_size/ableton_size:.1f}x larger")
 
+    # Custom format example
+    print("3. Custom synthesizer format (64 frames, 512 samples each)")
+    Wavetable(test_wave, "generated/custom_format.wav", frames=64, samples_per_frame=512)
+    custom_size = os.path.getsize("generated/custom_format.wav")
+    print(f"   ✓ Generated custom format wavetable ({custom_size:,} bytes)")
+
     # More complex example with morphing
-    print("3. Complex morphing for different synthesizers")
+    print("4. Complex morphing for different synthesizers")
     morph_wave = Segment(H(1) + 0.2*H(3), PM(H(1), H(2), 0.8), 16.0)
 
     Wavetable(morph_wave, "generated/complex_serum.wav", samples_per_frame=SERUM_SAMPLES_PER_FRAME)
     Wavetable(morph_wave, "generated/complex_ableton.wav", samples_per_frame=ABLETON_SAMPLES_PER_FRAME)
-    print("   ✓ Generated complex morphing wavetables for both formats")
+    print("   ✓ Generated complex morphing wavetables for multiple formats")
 
     print("   Synthesizer compatibility examples completed!\n")
 
