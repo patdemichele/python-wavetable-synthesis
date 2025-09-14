@@ -1,5 +1,0 @@
-# Test variables
-let a = f
-let b = 3f
-let c = a
-c

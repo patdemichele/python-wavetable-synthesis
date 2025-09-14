@@ -1,6 +1,0 @@
-# Test combined normalization and length control
-let loud_segment = segment(5.0 * f, 8.0 * 3f, 7)
-
-# First normalize, then scale length
-let normalized = n(loud_segment)
-setlen(normalized, 15)

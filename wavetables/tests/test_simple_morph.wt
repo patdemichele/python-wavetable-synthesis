@@ -1,2 +1,0 @@
-# Test simple morphing without concatenation
-segment(f, 2f, 10)

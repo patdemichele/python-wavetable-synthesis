@@ -1,12 +1,13 @@
-# Compiled binaries
-compile
-wavetable_example
+# Python virtual environment
+wavetable_env/
 
-# Object files
-*.o
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
 
-# Generated WAV files
-*.wav
+# Generated files directory
+generated/
 
 # Ableton Live analysis files
 *.asd

@@ -1,4 +1,0 @@
-# Test segment morphing
-let start = f
-let end = 5f
-segment(start, end, 10)

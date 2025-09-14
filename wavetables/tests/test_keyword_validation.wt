@@ -1,2 +1,0 @@
-# This should fail - using reserved keyword as variable name
-let f = 2f

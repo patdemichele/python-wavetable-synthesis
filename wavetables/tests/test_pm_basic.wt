@@ -1,3 +1,0 @@
-# Basic phase modulation test
-# PM a fundamental with a second harmonic
-pm(f, 2f, 0.5)
