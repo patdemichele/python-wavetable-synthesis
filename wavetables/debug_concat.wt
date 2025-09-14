@@ -1,0 +1,4 @@
+# Simple concatenation test
+let seg1 = segment(f, 2f, 1)
+let seg2 = segment(2f, f, 1)
+cat(seg1, seg2)

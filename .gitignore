@@ -1,0 +1,12 @@
+# Compiled binaries
+compile
+wavetable_example
+
+# Object files
+*.o
+
+# Generated WAV files
+*.wav
+
+# Ableton Live analysis files
+*.asd
