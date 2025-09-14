@@ -53,16 +53,21 @@ The core data structure is the `WaveSegment`, which represents either a
 - **Static Wave** (length=0): Single waveform with harmonics
 - **Morphing Segment** (length>0): An evolving waveform over time
 
-A static wave is constructed as the sum of frequencies, and the morphing segments are built up from static waves. Segments can be scaled by amplitude or length. A set of segments can be concatenated (over time). We can perform addition and phase modulation between segments of the same length. `Wavetable` and `Play` functions exist to export segments to audio files. The detailed spec is as follows:
+A static wave is constructed as the sum of frequencies, and the morphing segments are built up from static waves or other morphing segments. Segments can be scaled by amplitude or length. A set of segments can be concatenated (over time). We can perform addition and phase modulation between segments of the same length. `Wavetable` and `Play` functions exist to export segments to audio files.
 
-### Functions
+### Function Spec
 
 - `H(n: int, amplitude: float = 1.0) -> WaveSegment` - Create nth harmonic
+- `DC(offset: float) -> WaveSegment` - Create DC (constant) offset wave (-1.0 to 1.0)
+- `Center(wave: WaveSegment) -> WaveSegment` - Remove DC offset by centering wave at average value
+- `Clip(wave: WaveSegment, min_val: float = -1.0, max_val: float = 1.0) -> WaveSegment` - Clip amplitude to specified range
 - `PM(carrier: WaveSegment, modulator: WaveSegment, amount: float) -> WaveSegment` - Phase modulation
 - `Segment(start: WaveSegment, end: WaveSegment, length: float) -> WaveSegment` - Create morphing segment
 - `Cat(*segments: WaveSegment) -> WaveSegment` - Concatenate segments
 - `SetLength(wave: WaveSegment, length: float) -> WaveSegment` - Set segment length
-- `N(wave: WaveSegment) -> WaveSegment` - Normalize to prevent clipping (automatic in Wavetable/Play)
+- `N(wave: WaveSegment) -> WaveSegment` - If non-zero, normalize to maximum absolute amplitude of 1.0 (automatic in Wavetable/Play)
+- `wave1 + wave2` - Add two WaveSegments (combines harmonics or morphs compatible segments)
+- `scalar * wave` or `wave * scalar` - Scale WaveSegment amplitude by scalar value
 - `Wavetable(wave: WaveSegment, filename: str, frames: int = 256, samples_per_frame: int = 2048) -> None` - Export wavetable (auto-normalizes)
 - `Play(wave: WaveSegment, filename: str, note: str = None, frequency: float = None, duration: float = 1.0) -> None` - Export audio (auto-normalizes)
 
@@ -76,6 +81,17 @@ A static wave is constructed as the sum of frequencies, and the morphing segment
 fundamental = H(1)        # F0
 second = H(2)            # F0 * 2
 third = H(3, 0.5)        # F0 * 3 at half amplitude
+
+# DC offset (constant value)
+dc_offset = DC(0.1)       # Constant +0.1 offset
+wave_with_offset = H(1) + DC(0.2)  # Sine wave with DC offset
+
+# Remove DC offset
+centered_wave = Center(wave_with_offset)  # Removes the DC(0.2) component
+
+# Amplitude clipping
+loud_wave = 2.0 * H(1)    # Wave with amplitude > 1.0
+clipped_wave = Clip(loud_wave, -0.8, 0.8)  # Clip to ±0.8 range
 
 # Additive synthesis - using sum() with proper start value
 sawtooth = sum((H(i, 1.0/i) for i in range(1, 16)), H(0, 0.0))

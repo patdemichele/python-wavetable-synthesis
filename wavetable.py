@@ -78,7 +78,12 @@ class WaveSegment:
         t = np.linspace(0, 2 * np.pi, sample_count, endpoint=False)
 
         for freq_multiple, amplitude in self.harmonics.items():
-            samples += amplitude * np.sin(freq_multiple * t)
+            if freq_multiple == 0:
+                # DC component - constant offset
+                samples += amplitude
+            else:
+                # AC component - sine wave
+                samples += amplitude * np.sin(freq_multiple * t)
 
         return samples
 
@@ -259,6 +264,85 @@ class PMWave(WaveSegment):
 def H(harmonic: int, amplitude: float = 1.0) -> WaveSegment:
     """Create a harmonic wave."""
     return WaveSegment.from_harmonics({harmonic: amplitude})
+
+
+def DC(offset: float) -> WaveSegment:
+    """
+    Create a DC (constant) offset wave.
+
+    Args:
+        offset: DC offset value (-1.0 to 1.0)
+
+    Returns:
+        WaveSegment with constant DC offset
+    """
+    if not (-1.0 <= offset <= 1.0):
+        raise ValueError(f"DC offset must be between -1.0 and 1.0, got {offset}")
+
+    # DC is represented as the 0th harmonic (constant term)
+    return WaveSegment.from_harmonics({0: offset})
+
+
+def Center(wave: WaveSegment) -> WaveSegment:
+    """
+    Remove DC offset by centering the wave at its average value.
+
+    Args:
+        wave: Input wave segment to center
+
+    Returns:
+        New WaveSegment with DC offset removed
+    """
+    # For static waves with harmonics, simply remove the 0th harmonic (DC component)
+    if hasattr(wave, 'harmonics') and wave.harmonics is not None:
+        centered_harmonics = {h: amp for h, amp in wave.harmonics.items() if h != 0}
+        if not centered_harmonics:
+            # If only DC was present, return a zero wave
+            return WaveSegment.from_harmonics({1: 0.0})
+        return WaveSegment.from_harmonics(centered_harmonics)
+
+    # For complex waves (PM, morphing, concatenated), we need to generate samples
+    # and calculate the actual DC offset, then subtract it
+    samples = wave.generate_frames(1, SAMPLES_PER_FRAME)[0]
+    dc_offset = np.mean(samples)
+
+    # Create a new wave that subtracts this DC offset
+    return wave + DC(-dc_offset)
+
+
+def Clip(wave: WaveSegment, min_val: float = -1.0, max_val: float = 1.0) -> WaveSegment:
+    """
+    Clip a wave segment to specified amplitude range.
+
+    Args:
+        wave: Input wave segment to clip
+        min_val: Minimum amplitude value (default -1.0)
+        max_val: Maximum amplitude value (default 1.0)
+
+    Returns:
+        New WaveSegment with amplitude clipped to [min_val, max_val]
+    """
+    if min_val >= max_val:
+        raise ValueError(f"min_val ({min_val}) must be less than max_val ({max_val})")
+
+    class ClippedWave(WaveSegment):
+        def __init__(self, source_wave, min_val, max_val):
+            super().__init__()
+            self.source_wave = source_wave
+            self.min_val = min_val
+            self.max_val = max_val
+            self.length = source_wave.length
+            self.max_amplitude = max_val  # Clipped max amplitude
+
+        def generate_frames(self, frame_count: int, samples_per_frame: int = SAMPLES_PER_FRAME):
+            source_frames = self.source_wave.generate_frames(frame_count, samples_per_frame)
+            clipped_frames = []
+            for frame in source_frames:
+                clipped_frame = np.clip(frame, self.min_val, self.max_val)
+                clipped_frames.append(clipped_frame)
+            return clipped_frames
+
+    return ClippedWave(wave, min_val, max_val)
 
 
 def Segment(start_wave: WaveSegment, end_wave: WaveSegment, length: float = 1.0) -> WaveSegment:
