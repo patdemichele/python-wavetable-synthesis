@@ -572,10 +572,13 @@ def SetLength(wave_segment: WaveSegment, new_length: float) -> WaveSegment:
 
 # Audio generation and export functions
 
-def Wavetable(wave_segment: WaveSegment, filename: str, frames: int = DEFAULT_FRAME_COUNT,
+def Wavetable(wave_segment: WaveSegment, filename: str = None, frames: int = DEFAULT_FRAME_COUNT,
               samples_per_frame: int = SAMPLES_PER_FRAME):
     """
     Export a wave segment as a wavetable WAV file.
+
+    ⚠️  DEPRECATED: Use Render() instead for better functionality:
+        Render(wave, "wavetable", "file.wav", frames=256, samples_per_frame=2048)
 
     The wave segment is automatically normalized to prevent clipping.
 
@@ -585,6 +588,21 @@ def Wavetable(wave_segment: WaveSegment, filename: str, frames: int = DEFAULT_FR
         frames: Number of frames in the wavetable (default DEFAULT_FRAME_COUNT)
         samples_per_frame: Samples per frame (SERUM_SAMPLES_PER_FRAME=2048 or ABLETON_SAMPLES_PER_FRAME=1024)
     """
+    # Better error messages for common mistakes
+    if filename is None:
+        raise ValueError(
+            "Wavetable() requires a filename parameter.\n"
+            "Usage: Wavetable(wave, 'output.wav')\n"
+            "Or better yet, use: Render(wave, 'wavetable', 'output.wav')"
+        )
+
+    # Check if user is trying to use Render() syntax
+    if filename == "wavetable":
+        raise ValueError(
+            "It looks like you're trying to use Render() syntax with Wavetable().\n"
+            "Use: Render(wave, 'wavetable', 'filename.wav')\n"
+            "Or: Wavetable(wave, 'filename.wav')"
+        )
     # Always normalize to prevent clipping
     normalized_segment = N(wave_segment)
     frame_data = normalized_segment.generate_frames(frames, samples_per_frame)
@@ -596,10 +614,13 @@ def Wavetable(wave_segment: WaveSegment, filename: str, frames: int = DEFAULT_FR
     _export_wavetable_wav(wavetable_data, filename, samples_per_frame)
 
 
-def Play(wave_segment: WaveSegment, filename: str, frequency: float = None,
+def Play(wave_segment: WaveSegment, filename: str = None, frequency: float = None,
          note: str = None, duration: float = 1.0):
     """
     Export a wave segment as playable audio.
+
+    ⚠️  DEPRECATED: Use Render() instead for better functionality:
+        Render(wave, "audio", "file.wav", note="A4", duration=1.0)
 
     The wave segment is automatically normalized to prevent clipping.
 
@@ -610,8 +631,30 @@ def Play(wave_segment: WaveSegment, filename: str, frequency: float = None,
         note: MIDI note (e.g., 'A4', 'C#5')
         duration: Duration in seconds
     """
+    # Better error messages for common mistakes
+    if filename is None:
+        raise ValueError(
+            "Play() requires a filename parameter.\n"
+            "Usage: Play(wave, 'output.wav', note='A4')\n"
+            "Or better yet, use: Render(wave, 'audio', 'output.wav', note='A4')"
+        )
+
+    # Check if user is trying to use Render() syntax
+    if filename == "audio":
+        raise ValueError(
+            "It looks like you're trying to use Render() syntax with Play().\n"
+            "Use: Render(wave, 'audio', 'filename.wav', note='A4')\n"
+            "Or: Play(wave, 'filename.wav', note='A4')"
+        )
+
     if frequency is None and note is None:
-        raise ValueError("Must specify either frequency or note")
+        raise ValueError(
+            "Must specify either frequency or note parameter.\n"
+            "Examples:\n"
+            "  Play(wave, 'output.wav', frequency=440)\n"
+            "  Play(wave, 'output.wav', note='A4')\n"
+            "Or use: Render(wave, 'audio', 'output.wav', note='A4')"
+        )
     if frequency is not None and note is not None:
         raise ValueError("Cannot specify both frequency and note")
 
