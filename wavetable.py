@@ -71,6 +71,13 @@ class WaveSegment:
 
     def generate_samples(self, sample_count: int = SAMPLES_PER_FRAME) -> np.ndarray:
         """Generate audio samples for this wave segment."""
+        # Morphing segments should use generate_frames, not generate_samples
+        if self.length > 0:
+            # This shouldn't be called directly for morphing segments
+            # Return zeros to indicate this is not the right approach
+            return np.zeros(sample_count)
+
+        # Handle static waves with harmonics
         if not self.harmonics:
             return np.zeros(sample_count)
 
@@ -215,6 +222,62 @@ class WaveSegment:
         """Right multiply (scalar * wave)."""
         return self.__mul__(scalar)
 
+    def __str__(self) -> str:
+        """Human-readable representation showing the wave structure."""
+        return self._format_tree()
+
+    def __repr__(self) -> str:
+        """Developer representation showing the wave structure."""
+        return self._format_tree()
+
+    def _format_tree(self, indent: int = 0, prefix: str = "") -> str:
+        """Format the wave segment as a tree structure."""
+        spaces = "  " * indent
+
+        # Handle concatenated segments
+        if hasattr(self, '_segments') and self._segments:
+            result = f"{spaces}{prefix}Cat(\n"
+            for i, segment in enumerate(self._segments):
+                is_last = (i == len(self._segments) - 1)
+                segment_prefix = "└─ " if is_last else "├─ "
+                result += segment._format_tree(indent + 1, segment_prefix)
+                if not is_last:
+                    result += "\n"
+            result += f"\n{spaces})"
+            return result
+
+        # Handle morphing segments
+        if self.length > 0 and self.start_wave is not None and self.end_wave is not None:
+            result = f"{spaces}{prefix}Segment(length={self.length:.1f},\n"
+            result += self.start_wave._format_tree(indent + 1, "start: ")
+            result += "\n"
+            result += self.end_wave._format_tree(indent + 1, "end:   ")
+            result += f"\n{spaces})"
+            return result
+
+        # Handle static harmonic waves
+        if self.harmonics:
+            harmonics_list = []
+            for freq, amp in sorted(self.harmonics.items()):
+                if freq == 0:
+                    harmonics_list.append(f"DC({amp:.3f})")
+                else:
+                    if amp == 1.0:
+                        harmonics_list.append(f"H({freq})")
+                    else:
+                        harmonics_list.append(f"{amp:.3f}*H({freq})")
+
+            if len(harmonics_list) == 1:
+                return f"{spaces}{prefix}{harmonics_list[0]}"
+            else:
+                result = f"{spaces}{prefix}("
+                result += " + ".join(harmonics_list)
+                result += ")"
+                return result
+
+        # Empty wave
+        return f"{spaces}{prefix}Zero"
+
 
 class PMWave(WaveSegment):
     """Phase modulation wave segment."""
@@ -236,16 +299,86 @@ class PMWave(WaveSegment):
         # Generate modulator samples
         modulator_samples = self.modulator.generate_samples(sample_count)
 
-        # Generate phase-modulated samples
-        result = np.zeros(sample_count)
-        t = np.linspace(0, 2 * np.pi, sample_count, endpoint=False)
+        # Check if carrier has harmonics (static wave) or is a complex wave (morphing, etc.)
+        if hasattr(self.carrier, 'harmonics') and self.carrier.harmonics:
+            # Static harmonic wave - use harmonic-based PM
+            result = np.zeros(sample_count)
+            t = np.linspace(0, 2 * np.pi, sample_count, endpoint=False)
 
-        for freq_multiple, amplitude in self.carrier.harmonics.items():
-            base_phase = freq_multiple * t
-            modulated_phase = base_phase + self.amount * modulator_samples
-            result += amplitude * np.sin(modulated_phase)
+            for freq_multiple, amplitude in self.carrier.harmonics.items():
+                if freq_multiple == 0:
+                    # DC component - not affected by phase modulation
+                    result += amplitude
+                else:
+                    # AC component - apply phase modulation
+                    base_phase = freq_multiple * t
+                    modulated_phase = base_phase + self.amount * modulator_samples
+                    result += amplitude * np.sin(modulated_phase)
 
-        return result
+            return result
+        else:
+            # Complex wave (morphing, concatenated, etc.) - use sample-based PM
+            # For complex waves, we approximate PM by using the carrier as a base oscillator
+            # and applying the modulator as phase offset
+
+            t = np.linspace(0, 2 * np.pi, sample_count, endpoint=False)
+
+            # Use the carrier's amplitude envelope
+            carrier_samples = self.carrier.generate_samples(sample_count)
+
+            # Extract amplitude envelope (RMS of carrier)
+            carrier_rms = np.sqrt(np.mean(carrier_samples**2))
+            if carrier_rms < 1e-10:
+                return np.zeros(sample_count)
+
+            # Use carrier's spectral content by applying FM to a fundamental
+            # This preserves the carrier's characteristics while adding modulation
+            base_oscillator = np.sin(t)
+            modulated_oscillator = np.sin(t + self.amount * modulator_samples)
+
+            # Blend the base carrier with the modulated version
+            # This maintains the carrier's character while adding FM effects
+            result = 0.7 * carrier_samples + 0.3 * carrier_rms * modulated_oscillator
+
+            return result
+
+    def generate_frames(self, frame_count: int = DEFAULT_FRAME_COUNT, samples_per_frame: int = SAMPLES_PER_FRAME):
+        """Generate frames with proper morphing support for PM."""
+        # If both carrier and modulator are static (length == 0), use the standard approach
+        if (getattr(self.carrier, 'length', 0) == 0 and
+            getattr(self.modulator, 'length', 0) == 0):
+            # Both static - all frames identical
+            frame = self.generate_samples(samples_per_frame)
+            return [frame.copy() for _ in range(frame_count)]
+
+        # At least one is morphing - generate frame-by-frame with proper time evolution
+        frames = []
+        for i in range(frame_count):
+            t = i / max(frame_count - 1, 1)  # 0.0 to 1.0
+
+            # Get carrier at this time position
+            if getattr(self.carrier, 'length', 0) > 0:
+                # Morphing carrier - interpolate
+                carrier_at_t = self.carrier._interpolate_waves(
+                    self.carrier.start_wave, self.carrier.end_wave, t)
+            else:
+                # Static carrier
+                carrier_at_t = self.carrier
+
+            # Get modulator at this time position
+            if getattr(self.modulator, 'length', 0) > 0:
+                # Morphing modulator - interpolate
+                modulator_at_t = self.modulator._interpolate_waves(
+                    self.modulator.start_wave, self.modulator.end_wave, t)
+            else:
+                # Static modulator
+                modulator_at_t = self.modulator
+
+            # Create PM at this time position
+            pm_at_t = PMWave(carrier_at_t, modulator_at_t, self.amount)
+            frames.append(pm_at_t.generate_samples(samples_per_frame))
+
+        return frames
 
     def __mul__(self, scalar: Union[float, int]) -> 'PMWave':
         """Multiply PMWave by scalar - multiplies carrier amplitude."""
@@ -257,6 +390,16 @@ class PMWave(WaveSegment):
     def __rmul__(self, scalar: Union[float, int]) -> 'PMWave':
         """Right multiply (scalar * PMWave)."""
         return self.__mul__(scalar)
+
+    def _format_tree(self, indent: int = 0, prefix: str = "") -> str:
+        """Format the PMWave as a tree structure."""
+        spaces = "  " * indent
+        result = f"{spaces}{prefix}PM(amount={self.amount:.2f},\n"
+        result += self.carrier._format_tree(indent + 1, "carrier: ")
+        result += "\n"
+        result += self.modulator._format_tree(indent + 1, "modulator: ")
+        result += f"\n{spaces})"
+        return result
 
 
 # Utility functions for creating common waveforms
@@ -594,6 +737,320 @@ def _export_audio_wav(audio_data: np.ndarray, filename: str, sample_rate: int = 
 
         # Audio data
         f.write(samples_16bit.tobytes())
+
+
+def Render(wave_segment: WaveSegment,
+           output_type: str = "array",
+           filename: str = None,
+           # Wavetable parameters
+           frames: int = DEFAULT_FRAME_COUNT,
+           samples_per_frame: int = SAMPLES_PER_FRAME,
+           # Frame selection
+           frame_index: int = None,
+           # Audio parameters
+           frequency: float = None,
+           note: str = None,
+           duration: float = 1.0,
+           sample_rate: int = DEFAULT_SAMPLE_RATE,
+           # Processing options
+           normalize: bool = True):
+    """
+    Unified rendering function that can output to wavetable, audio, or numpy array.
+
+    Args:
+        wave_segment: The wave segment to render
+        output_type: "wavetable", "audio", or "array"
+        filename: Output filename (.wav) - required for wavetable/audio output
+
+        # Wavetable mode parameters:
+        frames: Number of frames in wavetable (default 256)
+        samples_per_frame: Samples per frame (2048 for Serum, 1024 for Ableton)
+
+        # Frame selection:
+        frame_index: Specific frame to extract (0 to frames-1). If None, returns all frames.
+
+        # Audio mode parameters:
+        frequency: Frequency in Hz (use either this or note)
+        note: MIDI note (e.g., 'A4', 'C#5')
+        duration: Duration in seconds
+        sample_rate: Sample rate in Hz
+
+        # Processing:
+        normalize: Whether to normalize output (default True)
+
+    Returns:
+        numpy.ndarray: Raw audio data (for all modes)
+        - Wavetable (frame_index=None): 2D array [frames, samples_per_frame]
+        - Wavetable (frame_index=N): 1D array [samples_per_frame] for frame N
+        - Audio: 1D array [total_samples]
+        - Array: 1D or 2D array depending on wave_segment type and frame_index
+    """
+    import numpy as np
+
+    # Apply normalization if requested
+    segment = N(wave_segment) if normalize else wave_segment
+
+    if output_type == "wavetable":
+        # Generate wavetable frames
+        frame_data = segment.generate_frames(frames, samples_per_frame)
+        audio_array = np.array(frame_data)  # 2D: [frames, samples_per_frame]
+
+        # Handle frame selection
+        if frame_index is not None:
+            if not (0 <= frame_index < frames):
+                raise ValueError(f"frame_index must be between 0 and {frames-1}, got {frame_index}")
+            selected_frame = audio_array[frame_index]  # 1D: [samples_per_frame]
+
+            if filename:
+                # Export single frame as wavetable (duplicate frame to fill wavetable)
+                single_frame_data = [selected_frame] * frames
+                flat_data = np.concatenate(single_frame_data)
+                _export_wavetable_wav(flat_data, filename, samples_per_frame)
+
+            return selected_frame
+        else:
+            # Return all frames
+            if filename:
+                # Flatten frames for export
+                flat_data = np.concatenate(frame_data)
+                _export_wavetable_wav(flat_data, filename, samples_per_frame)
+
+            return audio_array
+
+    elif output_type == "audio":
+        # Validate audio parameters
+        if frequency is None and note is None:
+            raise ValueError("Audio mode requires either frequency or note")
+        if filename is None:
+            raise ValueError("Audio mode requires filename")
+
+        # Convert note to frequency if needed
+        if note is not None:
+            frequency = _note_to_frequency(note)
+
+        # Generate audio samples
+        total_samples = int(duration * sample_rate)
+        fundamental_samples_per_cycle = sample_rate / frequency
+
+        # For morphing segments, render across time
+        if hasattr(segment, 'length') and segment.length > 0:
+            # Check if it's a concatenated segment
+            if hasattr(segment, '_segments'):
+                # Concatenated segment - use generate_frames approach
+                frame_count = max(1, int(duration * 10))  # 10 frames per second
+                frames = segment.generate_frames(frame_count, int(total_samples / frame_count))
+                audio_array = np.concatenate(frames)[:total_samples]
+            else:
+                # Morphing/evolving segment - render across duration
+                samples_list = []
+                time_frames = max(1, int(duration * 10))  # 10 frames per second for smooth evolution
+
+                for i in range(time_frames):
+                    t = i / max(time_frames - 1, 1)
+                    frame_samples = int(total_samples / time_frames)
+
+                    if hasattr(segment, 'start_wave') and hasattr(segment, 'end_wave'):
+                        # Morphing segment
+                        interpolated = segment._interpolate_waves(segment.start_wave, segment.end_wave, t)
+                        frame_audio = interpolated.generate_samples(frame_samples)
+                    else:
+                        # Other time-varying segments
+                        frame_audio = segment.generate_samples(frame_samples)
+
+                    samples_list.append(frame_audio)
+
+                audio_array = np.concatenate(samples_list)[:total_samples]
+        else:
+            # Static segment - generate single cycle and tile
+            cycle_samples = max(1, int(fundamental_samples_per_cycle))
+            single_cycle = segment.generate_samples(cycle_samples)
+
+            # Tile the cycle to fill duration
+            cycles_needed = int(np.ceil(total_samples / cycle_samples))
+            tiled_audio = np.tile(single_cycle, cycles_needed)
+            audio_array = tiled_audio[:total_samples]
+
+        # Export to file
+        _export_audio_wav(audio_array, filename, sample_rate)
+
+        return audio_array
+
+    elif output_type == "array":
+        # Return raw array for debugging/analysis
+        if isinstance(segment, PMWave) or (hasattr(segment, 'length') and segment.length > 0):
+            # PMWave or morphing segment - return frames showing evolution
+            analysis_frames = frames if frame_index is not None else 8  # Use full frame count if selecting specific frame
+            frame_data = segment.generate_frames(analysis_frames, samples_per_frame)
+            frame_array = np.array(frame_data)  # 2D array
+
+            if frame_index is not None:
+                if not (0 <= frame_index < analysis_frames):
+                    raise ValueError(f"frame_index must be between 0 and {analysis_frames-1}, got {frame_index}")
+                return frame_array[frame_index]  # 1D array for specific frame
+            else:
+                return frame_array  # 2D array for all frames
+        else:
+            # Static segment - return single cycle (frame_index ignored for static waves)
+            return segment.generate_samples(samples_per_frame)  # 1D array
+
+    else:
+        raise ValueError(f"output_type must be 'wavetable', 'audio', or 'array', got '{output_type}'")
+
+
+def Visualize(wave_segment: WaveSegment,
+             frame_index: int = 0,
+             domain: str = "time",
+             frames: int = DEFAULT_FRAME_COUNT,
+             samples_per_frame: int = SAMPLES_PER_FRAME,
+             show: bool = True):
+    """
+    Visualize a specific frame in time or frequency domain.
+
+    Args:
+        wave_segment: The wave segment to visualize
+        frame_index: Which frame to visualize (default 0)
+        domain: "time", "frequency", or "both"
+        frames: Total frame count for morphing segments
+        samples_per_frame: Samples per frame
+        show: Whether to display the plot immediately
+
+    Returns:
+        tuple: (figure, axes) matplotlib objects for further customization
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("matplotlib is required for visualization. Install with: pip install matplotlib")
+
+    import numpy as np
+
+    # Get the specific frame data
+    frame_data = Render(wave_segment, "array", frame_index=frame_index,
+                       frames=frames, samples_per_frame=samples_per_frame)
+
+    if domain == "both":
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+        axes = (ax1, ax2)
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+        axes = (ax,)
+
+    if domain in ["time", "both"]:
+        ax_time = axes[0] if domain == "both" else axes[0]
+
+        # Time domain plot
+        time_axis = np.linspace(0, 1, len(frame_data))  # Normalized time (0 to 1 cycle)
+        ax_time.plot(time_axis, frame_data, 'b-', linewidth=1.5)
+        ax_time.set_xlabel('Normalized Time (0-1 cycle)')
+        ax_time.set_ylabel('Amplitude')
+        ax_time.set_title(f'Time Domain - Frame {frame_index}')
+        ax_time.grid(True, alpha=0.3)
+
+        # Add amplitude statistics
+        rms = np.sqrt(np.mean(frame_data**2))
+        peak = np.max(np.abs(frame_data))
+        ax_time.text(0.02, 0.98, f'RMS: {rms:.3f}\\nPeak: {peak:.3f}',
+                    transform=ax_time.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+
+    if domain in ["frequency", "both"]:
+        ax_freq = axes[1] if domain == "both" else axes[0]
+
+        # Frequency domain plot (FFT)
+        fft_data = np.fft.fft(frame_data)
+        fft_magnitude = np.abs(fft_data[:len(fft_data)//2])  # Only positive frequencies
+        freq_axis = np.arange(len(fft_magnitude))  # Harmonic numbers
+
+        # Only plot significant harmonics (above threshold)
+        threshold = np.max(fft_magnitude) * 0.01  # 1% of peak
+        significant_indices = np.where(fft_magnitude > threshold)[0]
+
+        if len(significant_indices) > 0:
+            ax_freq.stem(freq_axis[significant_indices], fft_magnitude[significant_indices],
+                        basefmt='k-', linefmt='r-', markerfmt='ro')
+            ax_freq.set_xlabel('Harmonic Number')
+            ax_freq.set_ylabel('Magnitude')
+            ax_freq.set_title(f'Frequency Domain - Frame {frame_index}')
+            ax_freq.grid(True, alpha=0.3)
+
+            # Limit x-axis to show only relevant harmonics
+            max_harmonic = min(50, np.max(significant_indices) + 5)
+            ax_freq.set_xlim(0, max_harmonic)
+
+            # Add harmonic info
+            fundamental = fft_magnitude[1] if len(fft_magnitude) > 1 else 0
+            total_energy = np.sum(fft_magnitude**2)
+            ax_freq.text(0.98, 0.98, f'Fundamental: {fundamental:.3f}\\nTotal Energy: {total_energy:.1f}',
+                        transform=ax_freq.transAxes, verticalalignment='top', horizontalalignment='right',
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        else:
+            ax_freq.text(0.5, 0.5, 'No significant frequency content',
+                        transform=ax_freq.transAxes, ha='center', va='center')
+
+    plt.tight_layout()
+
+    if show:
+        plt.show()
+
+    return fig, axes
+
+
+def AnalyzeFrame(wave_segment: WaveSegment,
+                frame_index: int = 0,
+                frames: int = DEFAULT_FRAME_COUNT,
+                samples_per_frame: int = SAMPLES_PER_FRAME):
+    """
+    Detailed numerical analysis of a specific frame.
+
+    Args:
+        wave_segment: The wave segment to analyze
+        frame_index: Which frame to analyze (default 0)
+        frames: Total frame count for morphing segments
+        samples_per_frame: Samples per frame
+
+    Returns:
+        dict: Analysis results with keys: rms, peak, dc_offset, thd, harmonics
+    """
+    import numpy as np
+
+    # Get the specific frame data
+    frame_data = Render(wave_segment, "array", frame_index=frame_index,
+                       frames=frames, samples_per_frame=samples_per_frame)
+
+    # Time domain analysis
+    rms = np.sqrt(np.mean(frame_data**2))
+    peak = np.max(np.abs(frame_data))
+    dc_offset = np.mean(frame_data)
+
+    # Frequency domain analysis
+    fft_data = np.fft.fft(frame_data)
+    fft_magnitude = np.abs(fft_data[:len(fft_data)//2])
+
+    # Extract harmonics (first 10 harmonics)
+    harmonics = {}
+    for i in range(min(10, len(fft_magnitude))):
+        if i == 0:
+            harmonics[f'DC'] = fft_magnitude[i] / len(frame_data)  # Normalize DC
+        else:
+            harmonics[f'H{i}'] = fft_magnitude[i] / (len(frame_data) / 2)  # Normalize harmonics
+
+    # Calculate Total Harmonic Distortion (THD)
+    if len(fft_magnitude) > 1:
+        fundamental = fft_magnitude[1]
+        harmonics_sum = np.sum(fft_magnitude[2:min(10, len(fft_magnitude))]**2)
+        thd = np.sqrt(harmonics_sum) / fundamental if fundamental > 0 else 0
+    else:
+        thd = 0
+
+    return {
+        'rms': rms,
+        'peak': peak,
+        'dc_offset': dc_offset,
+        'thd': thd,
+        'harmonics': harmonics,
+        'fundamental_freq': fft_magnitude[1] / (len(frame_data) / 2) if len(fft_magnitude) > 1 else 0,
+        'total_energy': np.sum(fft_magnitude**2)
+    }
 
 
 # Convenience aliases for common operations
