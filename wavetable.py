@@ -294,10 +294,33 @@ class PMWave(WaveSegment):
     def generate_samples(self, sample_count: int = SAMPLES_PER_FRAME) -> np.ndarray:
         """Generate phase-modulated samples."""
         if abs(self.amount) < 1e-10:
-            return self.carrier.generate_samples(sample_count)
+            # No modulation - just return carrier
+            if hasattr(self.carrier, '_frame_data'):
+                carrier_samples = self.carrier._frame_data
+                if len(carrier_samples) != sample_count:
+                    # Resample if needed
+                    return np.interp(
+                        np.linspace(0, 1, sample_count),
+                        np.linspace(0, 1, len(carrier_samples)),
+                        carrier_samples
+                    )
+                return carrier_samples
+            else:
+                return self.carrier.generate_samples(sample_count)
 
         # Generate modulator samples
-        modulator_samples = self.modulator.generate_samples(sample_count)
+        if hasattr(self.modulator, '_frame_data'):
+            # Modulator has pre-computed frame data (from concatenated segment)
+            modulator_samples = self.modulator._frame_data
+            if len(modulator_samples) != sample_count:
+                # Resample if needed
+                modulator_samples = np.interp(
+                    np.linspace(0, 1, sample_count),
+                    np.linspace(0, 1, len(modulator_samples)),
+                    modulator_samples
+                )
+        else:
+            modulator_samples = self.modulator.generate_samples(sample_count)
 
         # Check if carrier has harmonics (static wave) or is a complex wave (morphing, etc.)
         if hasattr(self.carrier, 'harmonics') and self.carrier.harmonics:
@@ -324,7 +347,18 @@ class PMWave(WaveSegment):
             t = np.linspace(0, 2 * np.pi, sample_count, endpoint=False)
 
             # Use the carrier's amplitude envelope
-            carrier_samples = self.carrier.generate_samples(sample_count)
+            if hasattr(self.carrier, '_frame_data'):
+                # Carrier has pre-computed frame data (from concatenated segment)
+                carrier_samples = self.carrier._frame_data
+                if len(carrier_samples) != sample_count:
+                    # Resample if needed
+                    carrier_samples = np.interp(
+                        np.linspace(0, 1, sample_count),
+                        np.linspace(0, 1, len(carrier_samples)),
+                        carrier_samples
+                    )
+            else:
+                carrier_samples = self.carrier.generate_samples(sample_count)
 
             # Extract amplitude envelope (RMS of carrier)
             carrier_rms = np.sqrt(np.mean(carrier_samples**2))
@@ -358,18 +392,36 @@ class PMWave(WaveSegment):
 
             # Get carrier at this time position
             if getattr(self.carrier, 'length', 0) > 0:
-                # Morphing carrier - interpolate
-                carrier_at_t = self.carrier._interpolate_waves(
-                    self.carrier.start_wave, self.carrier.end_wave, t)
+                # Check if it's a concatenated segment
+                if hasattr(self.carrier, '_segments'):
+                    # Concatenated carrier - get the frame directly from concatenated segment
+                    carrier_frames = self.carrier.generate_frames(frame_count, samples_per_frame)
+                    carrier_frame = carrier_frames[i]
+                    # Create a static wave from this frame's data
+                    carrier_at_t = WaveSegment()
+                    carrier_at_t._frame_data = carrier_frame  # Store frame data for PM to use
+                else:
+                    # Morphing carrier - interpolate
+                    carrier_at_t = self.carrier._interpolate_waves(
+                        self.carrier.start_wave, self.carrier.end_wave, t)
             else:
                 # Static carrier
                 carrier_at_t = self.carrier
 
             # Get modulator at this time position
             if getattr(self.modulator, 'length', 0) > 0:
-                # Morphing modulator - interpolate
-                modulator_at_t = self.modulator._interpolate_waves(
-                    self.modulator.start_wave, self.modulator.end_wave, t)
+                # Check if it's a concatenated segment
+                if hasattr(self.modulator, '_segments'):
+                    # Concatenated modulator - get the frame directly from concatenated segment
+                    modulator_frames = self.modulator.generate_frames(frame_count, samples_per_frame)
+                    modulator_frame = modulator_frames[i]
+                    # Create a static wave from this frame's data
+                    modulator_at_t = WaveSegment()
+                    modulator_at_t._frame_data = modulator_frame  # Store frame data for PM to use
+                else:
+                    # Morphing modulator - interpolate
+                    modulator_at_t = self.modulator._interpolate_waves(
+                        self.modulator.start_wave, self.modulator.end_wave, t)
             else:
                 # Static modulator
                 modulator_at_t = self.modulator
