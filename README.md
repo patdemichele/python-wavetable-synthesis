@@ -282,21 +282,28 @@ for frame_idx in [0, 64, 128, 192, 255]:
 
 # Detailed analysis of a specific frame
 detailed = AnalyzeFrame(test_wave, frame_index=128)
-print(f"RMS: {detailed['rms']:.4f}")                    # 0.5654
-print(f"Peak: {detailed['peak']:.4f}")                  # 0.8130
-print(f"DC Offset: {detailed['dc_offset']:.6f}")        # 0.000000
-print(f"THD: {detailed['thd']:.4f}")                    # 0.5748
-print(f"Fundamental: {detailed['fundamental_freq']:.4f}") # 0.6932
+print(f"RMS: {detailed['rms']:.4f}")                      # 0.5654 (root mean square amplitude)
+print(f"Peak: {detailed['peak']:.4f}")                    # 0.8130 (maximum absolute amplitude)
+print(f"DC Offset: {detailed['dc_offset']:.6f}")          # 0.000000 (average/bias level)
+print(f"THD: {detailed['thd']:.4f}")                      # 0.5748 (total harmonic distortion)
+print(f"Fundamental: {detailed['fundamental_freq']:.4f}") # 0.6932 (1st harmonic amplitude)
+
+# Analysis metrics explained:
+# - RMS: Root Mean Square amplitude (perceived loudness)
+# - Peak: Maximum absolute amplitude (clipping threshold)
+# - DC Offset: Average amplitude level (should be ~0 for audio)
+# - THD: Total Harmonic Distortion (harmonics/fundamental ratio, higher = more complex)
+# - Fundamental: Amplitude of the 1st harmonic (not frequency - that's always 1x base freq)
 
 # Harmonic content analysis
 for harmonic, value in list(detailed['harmonics'].items())[:5]:
     print(f"{harmonic}: {value:.4f}")
 # Output:
-# DC: 0.0000
-# H1: 0.6932  (fundamental)
-# H2: 0.2383  (second harmonic)
-# H3: 0.0008  (weak third)
-# H4: 0.3153  (strong fourth)
+# DC: 0.0000   (DC component amplitude)
+# H1: 0.6932   (fundamental frequency amplitude)
+# H2: 0.2383   (second harmonic amplitude)
+# H3: 0.0008   (third harmonic amplitude - very weak)
+# H4: 0.3153   (fourth harmonic amplitude - strong)
 ```
 
 ### Visualize() - Time & Frequency Domain Plots
@@ -315,7 +322,7 @@ fig_both, axes = Visualize(test_wave, frame_index=128, domain="both", show=False
 fig_both.savefig("wave_analysis.png", dpi=150, bbox_inches="tight")
 ```
 
-![Wavetable Frame Analysis](generated/visualization_combined.png)
+![Wavetable Frame Analysis](docs/images/visualization_combined.png)
 
 *Example visualization showing both time domain waveform and frequency domain harmonics for a PM-modulated morphing segment*
 
